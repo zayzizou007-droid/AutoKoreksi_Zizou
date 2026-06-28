@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoKoreksi LJK - Scanner Pintar</title>
+    <!-- Tailwind CSS untuk Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome untuk Ikon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS untuk Export Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsPDF untuk Template PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; }
+        .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; font-weight: bold; }
+        .tab-inactive { color: #6b7280; }
+        
+        /* Container untuk overlay kamera dan canvas */
+        #scanner-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            aspect-ratio: 3/4;
+            background-color: #000;
+            overflow: hidden;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        #video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+        .target-box {
+            position: absolute;
+            top: 10%;
+            left: 10%;
+            width: 80%;
+            height: 80%;
+            border: 2px dashed rgba(59, 130, 246, 0.8);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            z-index: 5;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Grid visual untuk memandu user */
+        .grid-row { display: flex; flex: 1; border-bottom: 1px solid rgba(255,255,255,0.2); }
+        .grid-row:last-child { border-bottom: none; }
+        .grid-cell { flex: 1; border-right: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.3); font-size: 0.7rem;}
+        .grid-cell:last-child { border-right: none; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-50">
+        <div class="max-w-md mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold"><i class="fa-solid fa-check-double mr-2"></i> AutoKoreksi</h1>
+            <span class="text-sm bg-blue-500 px-2 py-1 rounded-full" id="total-scanned-badge">0 Siswa</span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-md mx-auto bg-white min-h-screen shadow-lg pb-20">
+        
+        <!-- Tabs Navigation -->
+        <div class="flex border-b overflow-x-auto">
+            <button onclick="switchTab('tab-template')" id="btn-tab-template" class="flex-1 py-3 px-2 text-center tab-active transition-colors min-w-[80px] text-sm"><i class="fa-solid fa-file-pdf mr-1"></i> Template</button>
+            <button onclick="switchTab('tab-kunci')" id="btn-tab-kunci" class="flex-1 py-3 px-2 text-center tab-inactive transition-colors min-w-[80px] text-sm"><i class="fa-solid fa-key mr-1"></i> Kunci</button>
+            <button onclick="switchTab('tab-scan')" id="btn-tab-scan" class="flex-1 py-3 px-2 text-center tab-inactive transition-colors min-w-[80px] text-sm"><i class="fa-solid fa-camera mr-1"></i> Scan</button>
+            <button onclick="switchTab('tab-hasil')" id="btn-tab-hasil" class="flex-1 py-3 px-2 text-center tab-inactive transition-colors min-w-[80px] text-sm"><i class="fa-solid fa-list mr-1"></i> Hasil</button>
+        </div>
+
+        <!-- TAB 0: TEMPLATE LJK -->
+        <div id="tab-template" class="p-4 block">
+            <h2 class="text-lg font-bold mb-4 text-gray-700">1. Pengaturan & Template LJK</h2>
+            <p class="text-sm text-gray-500 mb-4">Tentukan jumlah soal secara manual. Download dan cetak PDF LJK untuk dibagikan ke siswa.</p>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-bold text-gray-700 mb-1">Jumlah Soal:</label>
+                <input type="number" id="input-jumlah-soal" min="1" max="60" value="10" placeholder="Contoh: 15" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <p class="text-xs text-gray-500 mt-1">*Maksimal disarankan 60 soal agar bulatan tetap bisa dibaca kamera.</p>
+            </div>
+            
+            <button onclick="downloadTemplatePDF()" class="w-full mb-6 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors">
+                <i class="fa-solid fa-file-pdf mr-2"></i> Download LJK (PDF)
+            </button>
+
+            <div class="border-t pt-4">
+                <button onclick="lanjutKeKunci()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors">
+                    2. Lanjut Atur Kunci Jawaban <i class="fa-solid fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB 1: PENGATURAN KUNCI JAWABAN -->
+        <div id="tab-kunci" class="p-4 hidden">
+            <h2 id="judul-tab-kunci" class="text-lg font-bold mb-2 text-gray-700">Kunci Jawaban (10 Soal)</h2>
+            <p class="text-sm text-gray-500 mb-4">Pilih jawaban benar dan atur skor/poin untuk masing-masing soal secara manual.</p>
+            
+            <div id="kunci-container" class="space-y-2 mb-6">
+                <!-- Dihasilkan melalui JS -->
+            </div>
+            
+            <button onclick="simpanKunci()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors">
+                <i class="fa-solid fa-save mr-2"></i> Simpan Kunci Jawaban
+            </button>
+        </div>
+
+        <!-- TAB 2: SCANNER KAMERA -->
+        <div id="tab-scan" class="p-4 hidden">
+            <div class="mb-4">
+                <label class="block text-sm font-bold text-gray-700 mb-1">Nama Siswa:</label>
+                <input type="text" id="input-nama-siswa" placeholder="Masukkan nama siswa..." class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <!-- Pesan Peringatan Keamanan -->
+            <div id="camera-warning" class="hidden mb-4 p-3 bg-red-100 text-red-700 text-xs rounded-lg border border-red-300">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i> Kamera diblokir. Pastikan web dibuka menggunakan HTTPS atau Localhost. Jika Anda membuka file lokal, kamera mungkin tidak berfungsi.
+            </div>
+
+            <div id="scanner-container">
+                <video id="video-feed" autoplay playsinline muted></video>
+                <div class="target-box" id="target-box">
+                    <!-- Grid akan dibuat via JS -->
+                </div>
+                <canvas id="overlay-canvas"></canvas>
+            </div>
+            
+            <p class="text-xs text-center text-gray-500 mt-2 mb-4">Posisikan area jawaban (10 baris, 4 kolom) tepat di dalam kotak putus-putus.</p>
+            
+            <div class="flex gap-2">
+                <button onclick="captureAndGrade()" class="flex-[2] bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors flex items-center justify-center">
+                    <i class="fa-solid fa-camera-retro mr-2 text-xl"></i> Pindai
+                </button>
+                <button onclick="startCamera()" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold py-3 px-2 rounded-lg shadow transition-colors text-xs" title="Muat Ulang Kamera">
+                    <i class="fa-solid fa-rotate"></i> Kamera
+                </button>
+                <!-- Tombol Simulasi berguna jika kamera gagal / untuk testing -->
+                <button onclick="simulateScan()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3 px-4 rounded-lg shadow transition-colors" title="Simulasi Scan LJK">
+                    <i class="fa-solid fa-magic"></i>
+                </button>
+            </div>
+
+            <!-- Modal Hasil Cepat (Overlay) -->
+            <div id="result-overlay" class="hidden absolute top-0 left-0 w-full h-full bg-white bg-opacity-95 z-20 flex flex-col items-center justify-center p-4">
+                <h3 class="text-2xl font-bold text-gray-800 mb-2" id="res-nama">Nama Siswa</h3>
+                <div class="text-6xl font-black text-blue-600 mb-2" id="res-nilai">100</div>
+                <p class="text-gray-600 mb-6">Benar: <span id="res-benar" class="font-bold text-green-600">10</span> | Salah: <span id="res-salah" class="font-bold text-red-600">0</span></p>
+                <button onclick="closeResultOverlay()" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow">Lanjut Scan Berikutnya</button>
+            </div>
+        </div>
+
+        <!-- TAB 3: HASIL & EXPORT -->
+        <div id="tab-hasil" class="p-4 hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-700">Daftar Nilai</h2>
+                <button onclick="exportToExcel()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow text-sm transition-colors">
+                    <i class="fa-solid fa-file-excel mr-1"></i> Download Excel
+                </button>
+            </div>
+
+            <div class="overflow-x-auto bg-white rounded-lg shadow border">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-gray-50 text-gray-700 uppercase border-b">
+                        <tr>
+                            <th class="px-4 py-3">Nama</th>
+                            <th class="px-4 py-3 text-center">Nilai</th>
+                            <th class="px-4 py-3 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y">
+                        <!-- Data Siswa -->
+                    </tbody>
+                </table>
+                <div id="empty-state" class="text-center py-8 text-gray-500 hidden">
+                    <i class="fa-solid fa-folder-open text-4xl mb-2 text-gray-300"></i>
+                    <p>Belum ada data pindaian.</p>
+                </div>
+            </div>
+            
+            <button onclick="resetData()" class="mt-6 w-full bg-red-100 text-red-600 hover:bg-red-200 font-bold py-3 px-4 rounded-lg transition-colors border border-red-200">
+                <i class="fa-solid fa-trash mr-2"></i> Hapus Semua Data
+            </button>
+        </div>
+
+    </main>
+
+    <script>
+        // --- KONFIGURASI GLOBAL ---
+        let JUMLAH_SOAL = 10;
+        const OPSI_JAWABAN = ['A', 'B', 'C', 'D'];
+        let kunciJawaban = Array(JUMLAH_SOAL).fill('A'); // Default semua A
+        let bobotSoal = Array(JUMLAH_SOAL).fill(10); // Default poin
+        let dataSiswa = [];
+        let stream = null;
+        let siswaCounter = 1;
+
+        // --- INISIALISASI UI ---
+        document.addEventListener('DOMContentLoaded', () => {
+            switchTab('tab-template'); // Paksa mulai dari tab template
+            updateTable();
+            document.getElementById('input-nama-siswa').value = `Siswa ${siswaCounter}`;
+        });
+
+        // --- LOGIKA TAB ---
+        function switchTab(tabId) {
+            // Sembunyikan semua tab
+            document.getElementById('tab-template').classList.add('hidden');
+            document.getElementById('tab-kunci').classList.add('hidden');
+            document.getElementById('tab-scan').classList.add('hidden');
+            document.getElementById('tab-hasil').classList.add('hidden');
+            
+            // Reset styling tombol
+            const inactiveClass = "flex-1 py-3 px-2 text-center tab-inactive transition-colors min-w-[80px] text-sm";
+            document.getElementById('btn-tab-template').className = inactiveClass;
+            document.getElementById('btn-tab-kunci').className = inactiveClass;
+            document.getElementById('btn-tab-scan').className = inactiveClass;
+            document.getElementById('btn-tab-hasil').className = inactiveClass;
+
+            // Tampilkan tab aktif
+            document.getElementById(tabId).classList.remove('hidden');
+            document.getElementById('btn-' + tabId).className = "flex-1 py-3 px-2 text-center tab-active transition-colors min-w-[80px] text-sm";
+
+            // Manajemen Kamera
+            if(tabId === 'tab-scan') {
+                startCamera();
+            } else {
+                stopCamera();
+            }
+        }
+
+        // --- TAB 0: TEMPLATE LJK ---
+        function downloadTemplatePDF() {
+            const jml = parseInt(document.getElementById('input-jumlah-soal').value);
+            if (isNaN(jml) || jml < 1) {
+                alert("Masukkan jumlah soal yang valid!");
+                return;
+            }
+            
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(16);
+            doc.text("LEMBAR JAWABAN KOMPUTER", 105, 20, { align: "center" });
+            
+            doc.setFontSize(12);
+            doc.setFont("helvetica", "normal");
+            doc.text("Nama  : ___________________________", 30, 35);
+            doc.text("Kelas : ___________________________", 30, 45);
+            
+            doc.setFontSize(10);
+            doc.text("Petunjuk: Silang (X) atau Hitamkan salah satu bulatan.", 30, 55);
+
+            // Area Bounding Box (Scanner Target)
+            const startX = 40;
+            const startY = 65;
+            const boxW = 130;
+            const boxH = 200; // Fixed height, densitas isi disesuaikan jumlah soal
+            
+            doc.setDrawColor(59, 130, 246); // Warna biru batas
+            doc.setLineWidth(0.5);
+            doc.setLineDashPattern([2, 2], 0);
+            doc.rect(startX, startY, boxW, boxH);
+            doc.setLineDashPattern([], 0); 
+            doc.setDrawColor(0, 0, 0);
+
+            // Grid Soal
+            const cellW = boxW / 4;
+            const cellH = boxH / jml;
+            
+            // Adjust ukuran bulatan dan font agar tidak terlalu besar/kecil
+            const rCircle = Math.min(cellW, cellH) * 0.3;
+            const fontSizeOffset = jml >= 40 ? 6 : 8;
+            
+            doc.setFontSize(fontSizeOffset);
+            
+            for(let r=0; r<jml; r++) {
+                // Tulis Nomor
+                doc.text(`${r+1}.`, startX - 8, startY + (r*cellH) + (cellH/2) + 1);
+                
+                for(let c=0; c<4; c++) {
+                    const cx = startX + (c*cellW) + (cellW/2);
+                    const cy = startY + (r*cellH) + (cellH/2);
+                    
+                    doc.circle(cx, cy, rCircle);
+                    doc.text(OPSI_JAWABAN[c], cx - (rCircle/2), cy + (rCircle/3));
+                }
+            }
+
+            doc.save(`Template_LJK_${jml}_Soal.pdf`);
+        }
+
+        function lanjutKeKunci() {
+            const inputJml = parseInt(document.getElementById('input-jumlah-soal').value);
+            if (isNaN(inputJml) || inputJml < 1) {
+                alert("Masukkan jumlah soal yang valid!");
+                return;
+            }
+            JUMLAH_SOAL = inputJml;
+            
+            // Hitung poin default agar kira-kira totalnya 100
+            const poinDefault = Math.max(1, Math.floor(100 / JUMLAH_SOAL));
+            
+            // Reset kunci & bobot setiap ganti jumlah soal
+            kunciJawaban = Array(JUMLAH_SOAL).fill('A');
+            bobotSoal = Array(JUMLAH_SOAL).fill(poinDefault);
+            
+            document.getElementById('judul-tab-kunci').innerText = `Kunci & Poin (${JUMLAH_SOAL} Soal)`;
+            
+            // Render ulang UI Form Kunci dan Scanner Target
+            renderFormKunci();
+            renderTargetGrid();
+            
+            // Pindah tab
+            switchTab('tab-kunci');
+        }
+
+        // --- TAB 1: PENGATURAN KUNCI ---
+        function renderFormKunci() {
+            const container = document.getElementById('kunci-container');
+            container.innerHTML = '';
+            for(let i=0; i<JUMLAH_SOAL; i++) {
+                let optionsHtml = '';
+                OPSI_JAWABAN.forEach(opt => {
+                    const isSelected = kunciJawaban[i] === opt ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-gray-700 border-gray-300';
+                    optionsHtml += `
+                        <button onclick="setKunci(${i}, '${opt}')" id="btn-kunci-${i}-${opt}" 
+                            class="flex-1 py-1 px-1 border rounded-md font-bold transition-colors text-sm ${isSelected}">
+                            ${opt}
+                        </button>
+                    `;
+                });
+                container.innerHTML += `
+                    <div class="flex flex-wrap items-center gap-2 bg-gray-50 p-2 rounded-lg border">
+                        <span class="font-bold w-6 text-center text-gray-600">${i+1}.</span>
+                        <div class="flex-1 flex gap-1 min-w-[120px]">${optionsHtml}</div>
+                        <div class="flex items-center gap-1 border-l pl-2">
+                            <label class="text-xs text-gray-500 font-bold">Skor:</label>
+                            <input type="number" min="0" value="${bobotSoal[i]}" onchange="setBobot(${i}, this.value)" class="w-14 px-1 py-1 border rounded text-sm text-center focus:ring-1 focus:ring-blue-500 focus:outline-none">
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function setKunci(index, opsi) {
+            kunciJawaban[index] = opsi;
+            // Update UI Cepat (tanpa re-render semua)
+            OPSI_JAWABAN.forEach(opt => {
+                const btn = document.getElementById(`btn-kunci-${index}-${opt}`);
+                if(opt === opsi) {
+                    btn.className = "flex-1 py-1 px-2 border rounded-md font-bold transition-colors bg-blue-500 text-white border-blue-500";
+                } else {
+                    btn.className = "flex-1 py-1 px-1 border rounded-md font-bold transition-colors text-sm bg-white text-gray-700 border-gray-300";
+                }
+            });
+        }
+
+        function setBobot(index, nilai) {
+            let val = parseFloat(nilai);
+            if(isNaN(val) || val < 0) val = 0;
+            bobotSoal[index] = val;
+        }
+
+        function simpanKunci() {
+            alert('Kunci jawaban berhasil disimpan!');
+            switchTab('tab-scan');
+        }
+
+        // --- TAB 2: KAMERA & SCANNER (OMR LOGIC) ---
+        function renderTargetGrid() {
+            const targetBox = document.getElementById('target-box');
+            let html = '';
+            for(let r=0; r<JUMLAH_SOAL; r++){
+                html += `<div class="grid-row">`;
+                for(let c=0; c<OPSI_JAWABAN.length; c++){
+                    html += `<div class="grid-cell">${OPSI_JAWABAN[c]}</div>`;
+                }
+                html += `</div>`;
+            }
+            targetBox.innerHTML = html;
+        }
+
+        async function startCamera() {
+            const video = document.getElementById('video-feed');
+            const warningEl = document.getElementById('camera-warning');
+            
+            // Kompatibilitas ekstra untuk perangkat iOS/iPhone
+            video.setAttribute('autoplay', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
+
+            warningEl.classList.add('hidden'); // Sembunyikan peringatan
+
+            // Cek apakah lingkungan aman (HTTPS / localhost)
+            if (window.isSecureContext === false) {
+                warningEl.classList.remove('hidden');
+                alert("Akses kamera diblokir oleh browser karena koneksi tidak aman. Gunakan koneksi HTTPS atau Local Server.");
+                return;
+            }
+
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    // Minta kamera belakang
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+                    });
+                    video.srcObject = stream;
+                    
+                    video.onloadedmetadata = () => {
+                        video.play();
+                    };
+                    
+                    // Bersihkan canvas saat kamera mulai
+                    const canvas = document.getElementById('overlay-canvas');
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0,0, canvas.width, canvas.height);
+                    
+                } catch (err) {
+                    console.error("Akses kamera ditolak atau tidak tersedia:", err);
+                    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                        alert("Anda menolak izin kamera. Silakan izinkan akses kamera di pengaturan browser HP Anda.");
+                    } else if (err.name === 'NotFoundError') {
+                        alert("Kamera tidak ditemukan di perangkat Anda.");
+                    } else {
+                        alert("Gagal mengakses kamera: " + err.message);
+                    }
+                }
+            } else {
+                warningEl.classList.remove('hidden');
+                alert("API Kamera tidak didukung. Pastikan menggunakan browser modern seperti Chrome/Safari versi terbaru.");
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video = document.getElementById('video-feed');
+                video.srcObject = null;
+                stream = null;
+            }
+        }
+
+        // --- INTI SISTEM KOREKSI (OMR ENGINE) ---
+        function captureAndGrade() {
+            const video = document.getElementById('video-feed');
+            const targetBox = document.getElementById('target-box');
+            const canvas = document.getElementById('overlay-canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            if (!video.videoWidth) {
+                alert("Kamera belum siap!");
+                return;
+            }
+
+            // Set ukuran canvas sama persis dengan elemen video yang dirender
+            const videoRect = video.getBoundingClientRect();
+            canvas.width = videoRect.width;
+            canvas.height = videoRect.height;
+
+            // Gambar frame video ke canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Hitung posisi Bounding Box (Target Box) relatif terhadap video
+            const boxRect = targetBox.getBoundingClientRect();
+            const containerRect = document.getElementById('scanner-container').getBoundingClientRect();
+            
+            const startX = boxRect.left - containerRect.left;
+            const startY = boxRect.top - containerRect.top;
+            const boxW = boxRect.width;
+            const boxH = boxRect.height;
+
+            // Ambil data piksel HANYA di area Target Box
+            const imageData = ctx.getImageData(startX, startY, boxW, boxH);
+            const pixels = imageData.data;
+
+            // Ukuran setiap sel (bulatan)
+            const cellW = boxW / OPSI_JAWABAN.length;
+            const cellH = boxH / JUMLAH_SOAL;
+
+            let jawabanSiswa = [];
+            let skorSiswa = [];
+            let totalSkor = 0;
+            let benar = 0;
+
+            // Bersihkan canvas untuk menggambar overlay hasil
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Gambar ulang video secara statis agar overlay jelas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Gelapkan sedikit background
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(0,0, canvas.width, canvas.height);
+
+            // Algoritma Deteksi Kecerahan (Darkness Detection)
+            for (let r = 0; r < JUMLAH_SOAL; r++) {
+                let darkestCol = -1;
+                let minLuminance = 255; // Putih maksimal
+
+                for (let c = 0; c < OPSI_JAWABAN.length; c++) {
+                    // Tentukan koordinat sampel untuk sel ini (ambil area tengah sel agar lebih akurat)
+                    const sampleX = Math.floor(c * cellW + cellW * 0.2);
+                    const sampleY = Math.floor(r * cellH + cellH * 0.2);
+                    const sampleW = Math.floor(cellW * 0.6);
+                    const sampleH = Math.floor(cellH * 0.6);
+
+                    let totalLuminance = 0;
+                    let pixelCount = 0;
+
+                    for(let y = sampleY; y < sampleY + sampleH; y++) {
+                        for(let x = sampleX; x < sampleX + sampleW; x++) {
+                            // Indeks pixel pada array 1D
+                            const idx = (y * Math.floor(boxW) + x) * 4;
+                            // Rumus luminance standar: 0.299*R + 0.587*G + 0.114*B
+                            const rVal = pixels[idx];
+                            const gVal = pixels[idx+1];
+                            const bVal = pixels[idx+2];
+                            const luminance = (0.299*rVal + 0.587*gVal + 0.114*bVal);
+                            
+                            totalLuminance += luminance;
+                            pixelCount++;
+                        }
+                    }
+
+                    const avgLuminance = totalLuminance / pixelCount;
+
+                    // Cari yang paling gelap (nilai luminance terkecil)
+                    if (avgLuminance < minLuminance) {
+                        minLuminance = avgLuminance;
+                        darkestCol = c;
+                    }
+                }
+
+                // Thresholding: Pastikan sel terpilih cukup gelap dibanding kertas kosong
+                // (Untuk sistem yang stabil, idealnya ada perbandingan dengan putih kertas, tapi kita asumsikan yang paling gelap adalah jawaban)
+                let jawabanTerpilih = OPSI_JAWABAN[darkestCol];
+                jawabanSiswa.push(jawabanTerpilih);
+
+                // Koreksi dengan Kunci dan hitung berdasarkan bobot manual
+                const isCorrect = (jawabanTerpilih === kunciJawaban[r]);
+                const poinDidapat = isCorrect ? bobotSoal[r] : 0;
+                
+                skorSiswa.push(poinDidapat);
+                totalSkor += poinDidapat;
+                
+                if(isCorrect) benar++;
+
+                // Visualisasi Hasil di Canvas
+                const visualX = startX + (darkestCol * cellW) + (cellW/2);
+                const visualY = startY + (r * cellH) + (cellH/2);
+
+                ctx.beginPath();
+                ctx.arc(visualX, visualY, Math.min(cellW, cellH)*0.3, 0, 2 * Math.PI);
+                ctx.lineWidth = 3;
+                if(isCorrect) {
+                    ctx.strokeStyle = '#22c55e'; // Green
+                    ctx.fillStyle = 'rgba(34, 197, 94, 0.3)';
+                } else {
+                    ctx.strokeStyle = '#ef4444'; // Red
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.3)';
+                    
+                    // Gambar tanda X untuk yang salah
+                    ctx.moveTo(visualX - 5, visualY - 5);
+                    ctx.lineTo(visualX + 5, visualY + 5);
+                    ctx.moveTo(visualX + 5, visualY - 5);
+                    ctx.lineTo(visualX - 5, visualY + 5);
+                }
+                ctx.fill();
+                ctx.stroke();
+            }
+
+            const salah = JUMLAH_SOAL - benar;
+            const namaSiswa = document.getElementById('input-nama-siswa').value || `Siswa ${siswaCounter}`;
+
+            // Simpan Data
+            simpanHasil(namaSiswa, totalSkor, benar, salah, jawabanSiswa, skorSiswa);
+            
+            // Tampilkan Overlay Hasil
+            tampilkanOverlayHasil(namaSiswa, totalSkor, benar, salah);
+        }
+
+        // --- FUNGSI SIMULASI (Jika Kertas LJK tidak tersedia saat testing) ---
+        function simulateScan() {
+            // Berpura-pura menangkap dari canvas, lalu membuat jawaban random berdasarkan Kunci (70-100% benar)
+            let jawabanSiswa = [];
+            let skorSiswa = [];
+            let totalSkor = 0;
+            let benar = 0;
+            
+            for(let r=0; r<JUMLAH_SOAL; r++) {
+                let jwb;
+                // 80% chance benar
+                if(Math.random() > 0.2) {
+                    jwb = kunciJawaban[r];
+                    benar++;
+                } else {
+                    // Acak pilihan lain
+                    jwb = OPSI_JAWABAN[Math.floor(Math.random()*OPSI_JAWABAN.length)];
+                }
+                
+                jawabanSiswa.push(jwb);
+                const poinDidapat = (jwb === kunciJawaban[r]) ? bobotSoal[r] : 0;
+                skorSiswa.push(poinDidapat);
+                totalSkor += poinDidapat;
+            }
+
+            const salah = JUMLAH_SOAL - benar;
+            const namaSiswa = document.getElementById('input-nama-siswa').value || `Siswa ${siswaCounter}`;
+
+            simpanHasil(namaSiswa, totalSkor, benar, salah, jawabanSiswa, skorSiswa);
+            tampilkanOverlayHasil(namaSiswa, totalSkor, benar, salah);
+        }
+
+        // --- MANAJEMEN DATA & UI HASIL ---
+        function simpanHasil(nama, nilai, benar, salah, jawabanArr, skorArr) {
+            dataSiswa.push({
+                id: Date.now(),
+                nama: nama,
+                nilai: parseFloat(nilai.toFixed(2)), // Antisipasi angka desimal dari bobot
+                benar: benar,
+                salah: salah,
+                jawaban: jawabanArr.join(','),
+                skorPerSoal: skorArr
+            });
+            siswaCounter++;
+            document.getElementById('input-nama-siswa').value = `Siswa ${siswaCounter}`;
+            updateTable();
+            
+            document.getElementById('total-scanned-badge').innerText = `${dataSiswa.length} Siswa`;
+        }
+
+        function tampilkanOverlayHasil(nama, nilai, benar, salah) {
+            document.getElementById('res-nama').innerText = nama;
+            
+            const elNilai = document.getElementById('res-nilai');
+            elNilai.innerText = nilai;
+            if(nilai >= 75) elNilai.className = "text-6xl font-black text-green-600 mb-2";
+            else if(nilai >= 50) elNilai.className = "text-6xl font-black text-yellow-500 mb-2";
+            else elNilai.className = "text-6xl font-black text-red-600 mb-2";
+
+            document.getElementById('res-benar').innerText = benar;
+            document.getElementById('res-salah').innerText = salah;
+            
+            const overlay = document.getElementById('result-overlay');
+            overlay.classList.remove('hidden');
+            // Sedikit style tambahan ke parentnya (tab-scan) agar aman posisinya
+            document.getElementById('tab-scan').style.position = 'relative';
+        }
+
+        function closeResultOverlay() {
+            document.getElementById('result-overlay').classList.add('hidden');
+            // Hapus gambar di overlay canvas
+            const canvas = document.getElementById('overlay-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0,0, canvas.width, canvas.height);
+        }
+
+        // --- TAB 3: TABEL & EXPORT EXCEL ---
+        function updateTable() {
+            const tbody = document.getElementById('table-body');
+            const emptyState = document.getElementById('empty-state');
+            
+            tbody.innerHTML = '';
+            
+            if(dataSiswa.length === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                dataSiswa.forEach((siswa, index) => {
+                    let colorClass = siswa.nilai >= 75 ? 'text-green-600' : (siswa.nilai >= 50 ? 'text-yellow-600' : 'text-red-600');
+                    tbody.innerHTML += `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 font-medium text-gray-800">${siswa.nama}</td>
+                            <td class="px-4 py-3 text-center font-bold ${colorClass}">${siswa.nilai}</td>
+                            <td class="px-4 py-3 text-center">
+                                <button onclick="hapusSiswa(${siswa.id})" class="text-red-500 hover:text-red-700" title="Hapus">
+                                    <i class="fa-solid fa-trash-alt"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+        }
+
+        function hapusSiswa(id) {
+            dataSiswa = dataSiswa.filter(s => s.id !== id);
+            updateTable();
+            document.getElementById('total-scanned-badge').innerText = `${dataSiswa.length} Siswa`;
+        }
+
+        function resetData() {
+            if(confirm("Yakin ingin menghapus seluruh data siswa?")) {
+                dataSiswa = [];
+                siswaCounter = 1;
+                document.getElementById('input-nama-siswa').value = `Siswa ${siswaCounter}`;
+                updateTable();
+                document.getElementById('total-scanned-badge').innerText = `0 Siswa`;
+            }
+        }
+
+        // Export menggunakan library SheetJS
+        function exportToExcel() {
+            if(dataSiswa.length === 0) {
+                alert("Tidak ada data untuk diekspor!");
+                return;
+            }
+
+            // Persiapkan data untuk Excel sesuai format yang diminta
+            const excelData = dataSiswa.map((siswa, idx) => {
+                let row = {
+                    "No": idx + 1,
+                    "Nama Siswa": siswa.nama
+                };
+                
+                // Tambahkan skor untuk tiap nomor soal secara berurutan
+                siswa.skorPerSoal.forEach((skor, i) => {
+                    row[`Skor Soal ${i+1}`] = skor;
+                });
+                
+                // Tambahkan Jumlah Nilai (Total) di bagian paling akhir
+                row["Jumlah Nilai"] = siswa.nilai;
+                
+                return row;
+            });
+
+            // Buat worksheet dan workbook
+            const worksheet = XLSX.utils.json_to_sheet(excelData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Hasil Koreksi");
+
+            // Tentukan lebar kolom agar rapi (dinamis sesuai jumlah soal)
+            const wscols = [
+                {wch: 5},  // No
+                {wch: 25}  // Nama
+            ];
+            // Lebar untuk kolom soal
+            for(let i=0; i<JUMLAH_SOAL; i++) {
+                wscols.push({wch: 12});
+            }
+            // Lebar untuk kolom Jumlah Nilai
+            wscols.push({wch: 15});
+            
+            worksheet['!cols'] = wscols;
+
+            // Proses Download
+            const dateStr = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(workbook, `Hasil_Koreksi_LJK_${dateStr}.xlsx`);
+        }
+
+    </script>
+</body>
+</html>
